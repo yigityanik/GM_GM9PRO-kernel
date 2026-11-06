@@ -654,7 +654,7 @@ int sec_ts_wait_for_ready(struct sec_ts_data *ts, unsigned int ack)
 			}
 		}
 
-		if (retry++ > SEC_TS_WAIT_RETRY_CNT) {
+		if (++retry >= SEC_TS_WAIT_RETRY_CNT) {
 			input_err(true, &ts->client->dev, "%s: Time Over\n", __func__);
 			break;
 		}
