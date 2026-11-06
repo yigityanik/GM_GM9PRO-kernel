@@ -26,12 +26,12 @@
 };
 
 &pm660_charger {
-	qcom,usb-icl-ua = <2700000>;
-	qcom,fcc-max-ua = <2200000>;
+	qcom,usb-icl-ua = <3000000>;
+	qcom,fcc-max-ua = <3000000>;
 	qcom,fv-max-uv = <4400000>;
 	qcom,auto-recharge-soc;
 	qcom,autoadjust-vfloat;
-	qcom,thermal-mitigation = <2200000 2100000 1800000 1400000 1000000 600000 0>;
+	qcom,thermal-mitigation = <3000000 2500000 2000000 1500000 1000000 500000>;
 	qcom,float-option = <1>;
 	qcom,usb_therm-vadc = <&pm660_vadc>;
 	qcom,protect-temp-by-d-work;
@@ -42,7 +42,7 @@
 	qcom,fg-empty-voltage = <3000>;
 	qcom,fg-chg-term-current = <150>;
 	qcom,fg-sys-term-current = <(-170)>;
-	qcom,fg-jeita-thresholds = <0 10 45 55>;
+	qcom,fg-jeita-thresholds = <0 10 45 52>;
 	qcom,fg-recharge-soc-thr = <98>;
 	qcom,fg-auto-recharge-soc;
 	qcom,hold-soc-while-full;
@@ -68,9 +68,7 @@
  };
 
  &pm660_pdphy {
-	qcom,default-sink-caps = <5000 2000>, /* 5V @ 2A */
-							 <9000 1700>, /* 9V @ 1.7A */
-							 <5000 3000>, /* 5V @ 3A */
+	qcom,default-sink-caps = <5000 3000>, /* 5V @ 3A */
 							 <9000 3000>; /* 9V @ 3A */
 };
 
