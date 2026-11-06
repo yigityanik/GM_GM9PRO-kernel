@@ -2131,11 +2131,19 @@ static void tfa98xx_container_loaded(const struct firmware *cont, void *context)
 
 static int tfa98xx_load_container(struct tfa98xx *tfa98xx)
 {
+	const struct firmware *cont;
+	int ret;
+
 	tfa98xx->dsp_fw_state = TFA98XX_DSP_FW_PENDING;
 
-	return request_firmware_nowait(THIS_MODULE, FW_ACTION_HOTPLUG,
-		fw_name, tfa98xx->dev, GFP_KERNEL,
-		tfa98xx, tfa98xx_container_loaded);
+	ret = request_firmware(&cont, fw_name, tfa98xx->dev);
+	if (ret < 0) {
+		tfa98xx_container_loaded(NULL, tfa98xx);
+		return ret;
+	}
+
+	tfa98xx_container_loaded(cont, tfa98xx);
+	return 0;
 }
 
 
@@ -2653,7 +2661,7 @@ static int tfa98xx_probe(struct snd_soc_codec *codec)
 	tfa98xx->codec = codec;
 
 	ret = tfa98xx_load_container(tfa98xx);
-	pr_debug("Container loading requested: %d\n", ret);
+	pr_debug("Container load completed: %d\n", ret);
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,16,0)
 	codec->control_data = tfa98xx->regmap;
