@@ -13,6 +13,8 @@
 #include "include/sec_ts.h"
 
 static void sec_ts_read_info_work(struct work_struct *work);
+static void sec_ts_reset_work(struct work_struct *work);
+static void sec_ts_schedule_reset(struct sec_ts_data *ts);
 
 #ifdef USE_OPEN_CLOSE
 static int sec_ts_input_open(struct input_dev *dev);
@@ -391,6 +393,7 @@ int sec_ts_i2c_write(struct sec_ts_data *ts, u8 reg, u8 *data, int len)
 	if (ret == 1)
 		return 0;
 err:
+	sec_ts_schedule_reset(ts);
 	return -EIO;
 }
 
@@ -470,6 +473,11 @@ int sec_ts_i2c_read(struct sec_ts_data *ts, u8 reg, u8 *data, int len)
 				ts->comm_err_count++;
 			}
 		}
+		if (retry == SEC_TS_I2C_RETRY_CNT) {
+			input_err(true, &ts->client->dev, "%s: I2C address read over retry limit\n", __func__);
+			mutex_unlock(&ts->i2c_mutex);
+			goto err;
+		}
 
 		do {
 			if (remain > ts->i2c_burstmax)
@@ -495,6 +503,11 @@ int sec_ts_i2c_read(struct sec_ts_data *ts, u8 reg, u8 *data, int len)
 					ts->comm_err_count++;
 				}
 			}
+			if (retry == SEC_TS_I2C_RETRY_CNT) {
+				input_err(true, &ts->client->dev, "%s: I2C data read over retry limit\n", __func__);
+				mutex_unlock(&ts->i2c_mutex);
+				goto err;
+			}
 
 			msg[1].buf += msg[1].len;
 
@@ -507,11 +520,13 @@ int sec_ts_i2c_read(struct sec_ts_data *ts, u8 reg, u8 *data, int len)
 	if (retry == SEC_TS_I2C_RETRY_CNT) {
 		input_err(true, &ts->client->dev, "%s: I2C read over retry limit\n", __func__);
 		ret = -EIO;
+		sec_ts_schedule_reset(ts);
 	}
 
 	return ret;
 
 err:
+	sec_ts_schedule_reset(ts);
 	return -EIO;
 }
 
@@ -545,6 +560,7 @@ static int sec_ts_i2c_write_burst(struct sec_ts_data *ts, u8 *data, int len)
 	if (retry == SEC_TS_I2C_RETRY_CNT) {
 		input_err(true, &ts->client->dev, "%s: I2C write over retry limit\n", __func__);
 		ret = -EIO;
+		sec_ts_schedule_reset(ts);
 	}
 
 	return ret;
@@ -607,6 +623,7 @@ static int sec_ts_i2c_read_bulk(struct sec_ts_data *ts, u8 *data, int len)
 	if (ret == 1)
 		return 0;
 
+	sec_ts_schedule_reset(ts);
 	return -EIO;
 }
 
@@ -957,11 +974,14 @@ static int sec_ts_power(void *data, bool on)
 	const struct sec_ts_plat_data *pdata = ts->plat_data;
 	struct regulator *regulator_dvdd = NULL;
 	struct regulator *regulator_avdd = NULL;
-	static bool enabled;
+	bool dvdd_enabled;
+	bool avdd_enabled;
+	bool dvdd_started = false;
+	int dvdd_state;
+	int avdd_state;
+	int dvdd_ret;
+	int avdd_ret;
 	int ret = 0;
-
-	if (enabled == on)
-		return ret;
 
 	regulator_dvdd = regulator_get(NULL, pdata->regulator_dvdd);
 	if (IS_ERR_OR_NULL(regulator_dvdd)) {
@@ -979,28 +999,71 @@ static int sec_ts_power(void *data, bool on)
 		goto error;
 	}
 
+	dvdd_state = regulator_is_enabled(regulator_dvdd);
+	if (dvdd_state < 0) {
+		ret = dvdd_state;
+		input_err(true, &ts->client->dev, "%s: Failed to read %s regulator state: %d\n",
+				__func__, pdata->regulator_dvdd, ret);
+		goto error;
+	}
+	dvdd_enabled = dvdd_state > 0;
+
+	avdd_state = regulator_is_enabled(regulator_avdd);
+	if (avdd_state < 0) {
+		ret = avdd_state;
+		input_err(true, &ts->client->dev, "%s: Failed to read %s regulator state: %d\n",
+				__func__, pdata->regulator_avdd, ret);
+		goto error;
+	}
+	avdd_enabled = avdd_state > 0;
+
 	if (on) {
-		ret = regulator_enable(regulator_dvdd);
-		if (ret) {
-			input_err(true, &ts->client->dev, "%s: Failed to enable avdd: %d\n", __func__, ret);
+		if (!dvdd_enabled) {
+			ret = regulator_enable(regulator_dvdd);
+			if (ret) {
+				input_err(true, &ts->client->dev,
+						"%s: Failed to enable %s regulator: %d\n",
+						__func__, pdata->regulator_dvdd, ret);
+				goto error;
+			}
+			dvdd_started = true;
 		}
 
 		sec_ts_delay(1);
 
-		ret = regulator_enable(regulator_avdd);
-		if (ret) {
-			input_err(true, &ts->client->dev, "%s: Failed to enable vdd: %d\n", __func__, ret);
+		if (!avdd_enabled) {
+			ret = regulator_enable(regulator_avdd);
+			if (ret) {
+				input_err(true, &ts->client->dev,
+						"%s: Failed to enable %s regulator: %d\n",
+						__func__, pdata->regulator_avdd, ret);
+				if (dvdd_started) {
+					dvdd_ret = regulator_disable(regulator_dvdd);
+					if (dvdd_ret)
+						input_err(true, &ts->client->dev,
+								"%s: Failed to roll back %s regulator: %d\n",
+								__func__, pdata->regulator_dvdd, dvdd_ret);
+				}
+				goto error;
+			}
 		}
 	} else {
-		regulator_disable(regulator_dvdd);
-		regulator_disable(regulator_avdd);
+		dvdd_ret = dvdd_enabled ? regulator_disable(regulator_dvdd) : 0;
+		avdd_ret = avdd_enabled ? regulator_disable(regulator_avdd) : 0;
+		if (dvdd_ret || avdd_ret) {
+			ret = dvdd_ret ? dvdd_ret : avdd_ret;
+			input_err(true, &ts->client->dev,
+					"%s: Failed to disable regulators: dvdd=%d avdd=%d\n",
+					__func__, dvdd_ret, avdd_ret);
+			goto error;
+		}
 	}
 
-	enabled = on;
-
 error:
-	regulator_put(regulator_dvdd);
-	regulator_put(regulator_avdd);
+	if (!IS_ERR_OR_NULL(regulator_dvdd))
+		regulator_put(regulator_dvdd);
+	if (!IS_ERR_OR_NULL(regulator_avdd))
+		regulator_put(regulator_avdd);
 
 	return ret;
 }
@@ -1256,6 +1319,8 @@ static int sec_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 	ts->sec_ts_i2c_read_bulk = sec_ts_i2c_read_bulk;
 	ts->i2c_burstmax = pdata->i2c_burstmax;
 	INIT_DELAYED_WORK(&ts->work_read_info, sec_ts_read_info_work);
+	INIT_DELAYED_WORK(&ts->work_reset, sec_ts_reset_work);
+	atomic_set(&ts->reset_pending, 0);
 
 	i2c_set_clientdata(client, ts);
 
@@ -1280,7 +1345,12 @@ static int sec_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 	sec_ts_pinctrl_configure(ts, true);
 
 	/* power enable */
-	sec_ts_power(ts, true);
+	ret = sec_ts_power(ts, true);
+	if (ret < 0) {
+		input_err(true, &ts->client->dev, "%s: Failed to power on controller: %d\n",
+				__func__, ret);
+		goto err_init;
+	}
 	if (!pdata->regulator_boot_on)
 		sec_ts_delay(70);
 	ts->power_status = SEC_TS_STATE_POWER_ON;
@@ -1403,6 +1473,7 @@ static int sec_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 #ifdef CONFIG_SEC_TS_WAKE_GESTURES
 	sec_ts_wake_gestures_init(ts);
 #endif
+	ts->reset_recovery_enabled = true;
 
 	return 0;
 
@@ -1508,6 +1579,36 @@ static void sec_ts_read_info_work(struct work_struct *work)
 
 }
 
+static void sec_ts_schedule_reset(struct sec_ts_data *ts)
+{
+	if (!ts->reset_recovery_enabled ||
+			ts->power_status != SEC_TS_STATE_POWER_ON)
+		return;
+
+	if (atomic_cmpxchg(&ts->reset_pending, 0, 1) == 0) {
+		if (!schedule_delayed_work(&ts->work_reset, 1))
+			atomic_set(&ts->reset_pending, 0);
+	}
+}
+
+static void sec_ts_reset_work(struct work_struct *work)
+{
+	struct sec_ts_data *ts = container_of(work, struct sec_ts_data,
+			work_reset.work);
+
+	if (ts->reset_recovery_enabled &&
+			ts->power_status == SEC_TS_STATE_POWER_ON) {
+		input_err(true, &ts->client->dev,
+				"I2C communication failed; restarting touch controller\n");
+		sec_ts_stop_device(ts);
+		msleep(30);
+		if (ts->reset_recovery_enabled)
+			sec_ts_start_device(ts);
+	}
+
+	atomic_set(&ts->reset_pending, 0);
+}
+
 #ifdef USE_OPEN_CLOSE
 static int sec_ts_input_open(struct input_dev *dev)
 {
@@ -1547,6 +1648,8 @@ static int sec_ts_remove(struct i2c_client *client)
 
 	input_info(true, &ts->client->dev, "%s\n", __func__);
 
+	ts->reset_recovery_enabled = false;
+	cancel_delayed_work_sync(&ts->work_reset);
 	cancel_delayed_work_sync(&ts->work_read_info);
 	flush_delayed_work(&ts->work_read_info);
 
@@ -1592,6 +1695,8 @@ static void sec_ts_shutdown(struct i2c_client *client)
 
 int sec_ts_stop_device(struct sec_ts_data *ts)
 {
+	int ret = 0;
+
 	mutex_lock(&ts->device_mutex);
 
 	if (ts->power_status == SEC_TS_STATE_POWER_OFF) {
@@ -1604,13 +1709,18 @@ int sec_ts_stop_device(struct sec_ts_data *ts)
 	disable_irq(ts->client->irq);
 	sec_ts_locked_release_all_finger(ts);
 
-	ts->plat_data->power(ts, false);
+	ret = ts->plat_data->power(ts, false);
+	if (ret < 0) {
+		input_err(true, &ts->client->dev,
+				"%s: Failed to power off controller: %d\n", __func__, ret);
+		goto out;
+	}
 
 	sec_ts_pinctrl_configure(ts, false);
 
 out:
 	mutex_unlock(&ts->device_mutex);
-	return 0;
+	return ret;
 }
 
 int sec_ts_start_device(struct sec_ts_data *ts)
@@ -1628,7 +1738,12 @@ int sec_ts_start_device(struct sec_ts_data *ts)
 
 	sec_ts_locked_release_all_finger(ts);
 
-	ts->plat_data->power(ts, true);
+	ret = ts->plat_data->power(ts, true);
+	if (ret < 0) {
+		input_err(true, &ts->client->dev,
+				"%s: Failed to power on controller: %d\n", __func__, ret);
+		goto out;
+	}
 	sec_ts_delay(70);
 	ts->power_status = SEC_TS_STATE_POWER_ON;
 	ts->touch_noise_status = 0;

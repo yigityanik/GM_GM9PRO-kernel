@@ -283,6 +283,9 @@ struct sec_ts_data {
 	struct mutex eventlock;
 
 	struct delayed_work work_read_info;
+	struct delayed_work work_reset;
+	atomic_t reset_pending;
+	bool reset_recovery_enabled;
 #ifdef CONFIG_SECURE_TOUCH
 	atomic_t secure_enabled;
 	atomic_t secure_pending_irqs;
