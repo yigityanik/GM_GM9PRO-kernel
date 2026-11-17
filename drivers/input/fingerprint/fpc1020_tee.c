@@ -57,7 +57,7 @@
 #define NUM_PARAMS_REG_ENABLE_SET 2
 #define PROC_NAME  "hwinfo"
 
-#define tyt_debug printk("tyt %s:%d\n",__func__,__LINE__)
+#define tyt_debug do { } while (0)
 static struct proc_dir_entry *proc_entry;
 
 static const char * const pctl_names[] = {
