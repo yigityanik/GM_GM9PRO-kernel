@@ -683,10 +683,6 @@ static bool unmap_kernel_at_el0(const struct arm64_cpu_capabilities *entry)
 		return __kpti_forced > 0;
 	}
 
-	/* Useful for KASLR robustness */
-	if (IS_ENABLED(CONFIG_RANDOMIZE_BASE))
-		return true;
-
 	return false;
 }
 
