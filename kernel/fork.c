@@ -81,6 +81,7 @@
 #include <linux/sysctl.h>
 #include <linux/kcov.h>
 #include <linux/cpufreq_times.h>
+#include <linux/sched/core_ctl.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -1907,6 +1908,10 @@ long _do_fork(unsigned long clone_flags,
 	struct task_struct *p;
 	int trace = 0;
 	long nr;
+
+	/* Unisolate big CPUs when userspace launches an app */
+	if (task_is_zygote(current))
+		core_ctl_boost_kick(1000);
 
 	/*
 	 * Determine whether and which event to report to ptracer.  When
