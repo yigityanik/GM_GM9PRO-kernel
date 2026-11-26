@@ -1239,11 +1239,12 @@ void set_cpus_allowed_common(struct task_struct *p, const struct cpumask *new_ma
 static void get_adjusted_cpumask(const struct task_struct *p,
 	struct cpumask *new_mask, const struct cpumask *old_mask)
 {
-	static const unsigned long little_cluster_cpus = 0xf;
-
+	/* Force all performance-critical kthreads onto the big cluster */
+	if (p->flags & PF_PERF_CRITICAL)
+		cpumask_copy(new_mask, cpu_perf_mask);
 	/* Force all unbound kthreads onto the little cluster */
-	if (p->flags & PF_KTHREAD && cpumask_weight(old_mask) > 1)
-		cpumask_copy(new_mask, to_cpumask(&little_cluster_cpus));
+	else if (p->flags & PF_KTHREAD && cpumask_weight(old_mask) > 1)
+		cpumask_copy(new_mask, cpu_lp_mask);
 	else
 		cpumask_copy(new_mask, old_mask);
 }
