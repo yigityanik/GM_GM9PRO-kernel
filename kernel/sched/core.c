@@ -1242,9 +1242,6 @@ static void get_adjusted_cpumask(const struct task_struct *p,
 	/* Force all performance-critical kthreads onto the big cluster */
 	if (p->flags & PF_PERF_CRITICAL)
 		cpumask_copy(new_mask, cpu_perf_mask);
-	/* Force all unbound kthreads onto the little cluster */
-	else if (p->flags & PF_KTHREAD && cpumask_weight(old_mask) > 1)
-		cpumask_copy(new_mask, cpu_lp_mask);
 	else
 		cpumask_copy(new_mask, old_mask);
 }
