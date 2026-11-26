@@ -82,6 +82,7 @@
 #include <linux/kcov.h>
 #include <linux/cpufreq_times.h>
 #include <linux/devfreq_boost.h>
+#include <linux/sched/core_ctl.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -1913,6 +1914,7 @@ long _do_fork(unsigned long clone_flags,
 	if (task_is_zygote(current)) {
 		devfreq_boost_kick_max(DEVFREQ_MSM_CPUBW, 50);
 		devfreq_boost_kick_max(DEVFREQ_MMC, 300);
+		core_ctl_boost_kick(1000);
 	}
 
 	/*
