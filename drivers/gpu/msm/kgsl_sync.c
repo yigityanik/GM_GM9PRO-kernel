@@ -385,7 +385,7 @@ struct kgsl_sync_fence_waiter *kgsl_sync_fence_async_wait(int fd,
 	if (fence == NULL)
 		return ERR_PTR(-EINVAL);
 
-	if (sync_fence_signaled(fence)) {
+	if (!atomic_read(&fence->status)) {
 		sync_fence_put(fence);
 		return NULL;
 	}
