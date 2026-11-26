@@ -10,6 +10,7 @@
  * published by the Free Software Foundation.
  */
 
+#include <linux/devfreq_boost.h>
 #include <linux/err.h>
 #include <linux/of.h>
 #include <linux/slab.h>
@@ -3110,6 +3111,9 @@ int mmc_attach_mmc(struct mmc_host *host)
 		mmc_release_host(host);
 		goto remove_card;
 	}
+	if (host->clk_scaling.devfreq && !mmc_card_is_removable(host))
+		devfreq_register_boost_device(DEVFREQ_MMC,
+					      host->clk_scaling.devfreq);
 
 	register_reboot_notifier(&host->card->reboot_notify);
 

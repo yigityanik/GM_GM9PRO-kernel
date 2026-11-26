@@ -10,6 +10,7 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
+#include <linux/devfreq_boost.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
@@ -931,6 +932,7 @@ int mmc_exit_clk_scaling(struct mmc_host *host)
 		return err;
 	}
 
+	devfreq_unregister_boost_device(DEVFREQ_MMC, host->clk_scaling.devfreq);
 	err = devfreq_remove_device(host->clk_scaling.devfreq);
 	if (err) {
 		pr_err("%s: remove devfreq failed (%d)\n",

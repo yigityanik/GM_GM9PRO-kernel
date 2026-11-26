@@ -48,7 +48,8 @@ static void devfreq_max_unboost(struct work_struct *work);
 
 static struct df_boost_drv df_boost_drv_g __read_mostly = {
 	BOOST_DEV_INIT(df_boost_drv_g, DEVFREQ_MSM_CPUBW,
-		       CONFIG_DEVFREQ_MSM_CPUBW_BOOST_FREQ)
+		       CONFIG_DEVFREQ_MSM_CPUBW_BOOST_FREQ),
+	BOOST_DEV_INIT(df_boost_drv_g, DEVFREQ_MMC, 0)
 };
 
 static void __devfreq_boost_kick(struct boost_dev *b)
@@ -111,6 +112,13 @@ void devfreq_register_boost_device(enum df_device device, struct devfreq *df)
 	WRITE_ONCE(b->df, df);
 }
 
+void devfreq_unregister_boost_device(enum df_device device, struct devfreq *df)
+{
+	struct df_boost_drv *d = &df_boost_drv_g;
+
+	cmpxchg(&d->devices[device].df, df, NULL);
+}
+
 static void devfreq_input_unboost(struct work_struct *work)
 {
 	struct boost_dev *b = container_of(to_delayed_work(work),
@@ -131,14 +139,17 @@ static void devfreq_max_unboost(struct work_struct *work)
 
 static void devfreq_update_boosts(struct boost_dev *b, unsigned long state)
 {
-	struct devfreq *df = b->df;
+	struct devfreq *df = READ_ONCE(b->df);
+
+	if (!df)
+		return;
 
 	mutex_lock(&df->lock);
 	if (test_bit(SCREEN_OFF, &state)) {
 		df->min_freq = df->profile->freq_table[0];
 		df->max_boost = false;
 	} else {
-		df->min_freq = test_bit(INPUT_BOOST, &state) ?
+		df->min_freq = test_bit(INPUT_BOOST, &state) && b->boost_freq ?
 			       min(b->boost_freq, df->max_freq) :
 			       df->profile->freq_table[0];
 		df->max_boost = test_bit(MAX_BOOST, &state);
