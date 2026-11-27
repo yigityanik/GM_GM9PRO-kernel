@@ -520,6 +520,10 @@ static int mmc_devfreq_set_target(struct device *dev,
 	if (!clk_scaling->enable)
 		goto out;
 
+	/* Never leave the range of the frequency table */
+	*freq = clamp_t(unsigned long, *freq, clk_scaling->freq_table[0],
+			clk_scaling->freq_table[clk_scaling->freq_table_sz - 1]);
+
 	pr_debug("%s: target freq = %lu (%s)\n", mmc_hostname(host),
 		*freq, current->comm);
 
