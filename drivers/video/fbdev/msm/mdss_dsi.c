@@ -332,6 +332,11 @@ static int mdss_dsi_panel_power_off(struct mdss_panel_data *pdata)
 	if (mdss_dsi_pinctrl_set_state(ctrl_pdata, false))
 		pr_debug("reset disable: pinctrl not enabled\n");
 
+	if (gpio_is_valid(ctrl_pdata->amoled_vdd_en_gpio)) {
+		gpio_set_value(ctrl_pdata->amoled_vdd_en_gpio, 0);
+		gpio_free(ctrl_pdata->amoled_vdd_en_gpio);
+	}
+
 	ret = msm_dss_enable_vreg(
 		ctrl_pdata->panel_power_data.vreg_config,
 		ctrl_pdata->panel_power_data.num_vreg, 0);
@@ -355,6 +360,22 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
+
+	if (gpio_is_valid(ctrl_pdata->amoled_vdd_en_gpio)) {
+		int gpio_rc;
+
+		gpio_rc = gpio_request(ctrl_pdata->amoled_vdd_en_gpio,
+						"amoled_vdd_enable");
+		if (gpio_rc)
+			pr_err("request amoled_vdd_en_gpio failed, rc=%d\n",
+				gpio_rc);
+
+		gpio_rc = gpio_direction_output(
+				ctrl_pdata->amoled_vdd_en_gpio, 1);
+		if (gpio_rc)
+			pr_err("%s: unable to set dir for amoled_vdd_en gpio\n",
+				__func__);
+	}
 
 	ret = msm_dss_enable_vreg(
 		ctrl_pdata->panel_power_data.vreg_config,
@@ -4501,6 +4522,12 @@ static int mdss_dsi_parse_gpio_params(struct platform_device *ctrl_pdev,
 	ctrl_pdata->avdd_en_gpio_invert =
 			of_property_read_bool(ctrl_pdev->dev.of_node,
 				"qcom,platform-avdd-en-gpio-invert");
+
+	ctrl_pdata->amoled_vdd_en_gpio = of_get_named_gpio(
+			ctrl_pdev->dev.of_node,
+			"qcom,platform-amoled-vdd-en-gpio", 0);
+	if (!gpio_is_valid(ctrl_pdata->amoled_vdd_en_gpio))
+		pr_info("%s: amoled_vdd_en_gpio not specified\n", __func__);
 
 	ctrl_pdata->rst_gpio = of_get_named_gpio(ctrl_pdev->dev.of_node,
 			 "qcom,platform-reset-gpio", 0);
